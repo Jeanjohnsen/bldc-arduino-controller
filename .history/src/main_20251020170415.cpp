@@ -131,25 +131,22 @@ void setup() {
   pinMode(PIN_FR, OUTPUT);
   pinMode(PIN_PWM, OUTPUT);
   pinMode(PIN_RC_THROTTLE, INPUT);
-  pinMode(PIN_RC_DIR, INPUT_PULLUP);
+  pinMode(PIN_RC_DIR, INPUT_PULLUP); // stabiliser signal
 
   Serial.begin(115200);
   delay(200);
 
-  // --- Enable interrupts ---
-  // INT0 for throttle (D2)
-  EIMSK |= (1 << INT0);    // enable external interrupt 0
-  EICRA |= (1 << ISC00);   // trigger on CHANGE
-  // PCINT for direction (D4)
-  PCICR |= (1 << PCIE2);
-  PCMSK2 |= (1 << PCINT20);
+  // Enable interrupts
+  attachInterrupt(digitalPinToInterrupt(PIN_RC_THROTTLE), nullptr, CHANGE); // enable INT0
+  PCICR |= (1 << PCIE2);   // enable PCINT for D0–D7
+  PCMSK2 |= (1 << PCINT20); // enable PCINT for D4
 
   setEnable(true);
-  setDirectionCW(false);
+  setDirectionCW(false); // starter som CCW
   applyPWM(0);
   runState = STOPPED;
 
-  Serial.println(F("RC→BLDC (Input Capture via INT0 + PCINT2). D2=CH3 throttle, D4=CH4 dir, D9 PWM."));
+  Serial.println(F("RC→BLDC (Input Capture via PCINT). D2=CH3 throttle, D4=CH4 dir, D9 PWM."));
 }
 
 // ------------ LOOP ------------
