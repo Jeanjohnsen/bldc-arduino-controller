@@ -14,11 +14,11 @@
 
   Forbindelser:
   -------------
-  CH3 → D2 (INT0)       : Throttle (PWM)
-  CH4 → D4 (PCINT20)    : Direction (kun aktiv hvis USE_DIR=true)
-  D7  → FR              : Retning (HIGH = CW)
-  D8  → EN              : Enable til controller
-  D9  → SV              : PWM hastighedssignal
+  CH3 → D2 (INT0)  : Throttle (PWM)
+  CH4 → D4 (PCINT20): Direction (kun aktiv hvis USE_DIR=true)
+  D7  → FR          : Retning (HIGH = CW)
+  D8  → EN          : Enable til controller
+  D9  → SV          : PWM hastighedssignal
 */
 
 #define USE_DIR false  // ⚙️  true = CH4-retning, false = CW-only
@@ -39,10 +39,10 @@ const uint16_t FAILSAFE_MS = 200;
 const uint8_t  PUNCH_THRESH_PCT = 95;
 
 // Anti-stall parametre
-const uint8_t  MIN_RUN_PCT    = 18;
-const uint8_t  START_KICK_PCT = 100;
-const uint16_t START_KICK_MS  = 150;
-const uint16_t CRAWL_HOLD_MS  = 400;
+const uint8_t  MIN_RUN_PCT    = 18;    // min. duty for stabil rotation
+const uint8_t  START_KICK_PCT = 100;   // “spark” ved start
+const uint16_t START_KICK_MS  = 150;   // længde af spark
+const uint16_t CRAWL_HOLD_MS  = 400;   // hold crawl lidt før 0
 
 // ------------ STATE ------------
 enum RunState { STOPPED, RUNNING };
@@ -77,7 +77,7 @@ static inline void setEnable(bool on) { digitalWrite(PIN_EN, on ? HIGH : LOW); }
 static inline void setDirectionCW(bool cw) { dirCW = cw; digitalWrite(PIN_FR, cw ? HIGH : LOW); }
 static inline void forceCW() { digitalWrite(PIN_FR, HIGH); }
 
-static inline uint8_t pctToPwm(uint8_t pct){ if (pct>100) pct=100; return (pct*255UL)/100UL; }
+static inline uint8_t pctToPwm(uint8_t pct){ return (pct>100?255:(pct*255UL)/100UL); }
 static inline void applyPWM(uint8_t pct){ currentPct = pct; analogWrite(PIN_PWM, pctToPwm(pct)); }
 
 // ==================================================
@@ -116,7 +116,7 @@ void setup() {
 #endif
 
   Serial.begin(115200);
-  delay(300); // giver controlleren tid til at starte op
+  delay(200);
 
   // Aktiver interrupts
   EIMSK |= (1 << INT0);
@@ -163,6 +163,7 @@ void loop() {
   }
 
 #if USE_DIR
+  // --- Direction (kun aktiv hvis USE_DIR = true) ---
   static uint32_t lastWidthDir = 1500;
   noInterrupts();
   if (newPulseDir) { lastWidthDir = pulseWidthDir; newPulseDir = false; }
@@ -175,12 +176,14 @@ void loop() {
 
   if (wantCW != dirCW && currentPct < 10) setDirectionCW(wantCW);
 #else
+  // --- Tving CW ---
   forceCW();
 #endif
 
   // --- Anti-stall logik ---
   setEnable(true);
 
+  // 1. Kick ved 0 → >0
   if (currentPct == 0 && targetPct > 0 && now > tKickEnd) {
     applyPWM(START_KICK_PCT);
     tKickEnd = now + START_KICK_MS;
@@ -188,6 +191,7 @@ void loop() {
     return;
   }
 
+  // 2. Efter kick, hold minimum rotation
   if (now <= tKickEnd) {
     // stadig i kick-fase
   } else if (wasRunning && currentPct >= START_KICK_PCT) {
@@ -195,17 +199,18 @@ void loop() {
     applyPWM(hold);
   }
 
+  // 3. Normal ramp og crawl-hold
   if (now - tLastStep >= STEP_MS && now > tKickEnd) {
     tLastStep = now;
 
     if (targetPct >= PUNCH_THRESH_PCT) {
       applyPWM(100);
     } else if (currentPct < targetPct) {
-      applyPWM(min(currentPct + 2, targetPct));
+      applyPWM(min<uint8_t>(currentPct + 2, targetPct));
     } else if (currentPct > targetPct) {
       if (targetPct == 0) {
         if (currentPct > MIN_RUN_PCT) {
-          applyPWM(max(currentPct - 2, MIN_RUN_PCT));
+          applyPWM(max<int>(currentPct - 2, MIN_RUN_PCT));
           tZeroSince = now;
         } else {
           if (now - tZeroSince > CRAWL_HOLD_MS) {
@@ -214,7 +219,7 @@ void loop() {
           }
         }
       } else {
-        applyPWM(max(currentPct - 2, targetPct));
+        applyPWM(max<int>(currentPct - 2, targetPct));
       }
     }
   }
